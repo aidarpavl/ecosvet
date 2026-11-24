@@ -54,7 +54,12 @@ CREATE TABLE IF NOT EXISTS rooms (
     days_per_month REAL DEFAULT 22,
     months_per_year REAL DEFAULT 9,
     has_sensor INTEGER DEFAULT 0,
-    note TEXT DEFAULT ''
+    note TEXT DEFAULT '',
+    win_count INTEGER DEFAULT 0,
+    win_len REAL DEFAULT 0,
+    win_area REAL DEFAULT 0,
+    door_count INTEGER DEFAULT 0,
+    openings TEXT
 );
 CREATE TABLE IF NOT EXISTS lamps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +97,19 @@ DEFAULT_SETTINGS = {
     "co2_factor": "0.9",       # кг CO₂ на кВт·ч (угольная генерация, ориентировочно)
     "school_name": "КГУ «Специализированная школа-лицей «Жас дарын»",
     "llm_provider": "auto",
+    # естественное освещение (окна) — ориентировочные параметры
+    "window_height": "1.8",    # высота окна, м
+    "glazing_t": "0.65",       # светопропускание остекления с учётом загрязнения
+    "sky_angle": "70",         # видимый угол неба, градусы (без затенения ≈ 80)
+    "reflectance": "0.5",      # средний коэффициент отражения поверхностей
+    "ext_lux": "10000",        # средняя наружная освещённость в учебные часы, лк
+    "day_frac": "0.4",         # доля часов освещения, когда на улице светло
+    "data_version": "1",
+}
+
+ROOM_MIGRATIONS = {
+    "win_count": "INTEGER DEFAULT 0", "win_len": "REAL DEFAULT 0", "win_area": "REAL DEFAULT 0",
+    "door_count": "INTEGER DEFAULT 0", "openings": "TEXT",
 }
 
 
@@ -132,6 +150,10 @@ def init_db() -> bool:
     """Создаёт схему. Возвращает True, если база была пустой (нужен seed)."""
     with conn() as c:
         c.executescript(SCHEMA)
+        cols = {r[1] for r in c.execute("PRAGMA table_info(rooms)").fetchall()}
+        for col, typ in ROOM_MIGRATIONS.items():
+            if col not in cols:
+                c.execute(f"ALTER TABLE rooms ADD COLUMN {col} {typ}")
         for k, v in DEFAULT_SETTINGS.items():
             c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
         empty = c.execute("SELECT COUNT(*) FROM maps").fetchone()[0] == 0
@@ -214,7 +236,8 @@ def set_norm(room_type: str, lux: float) -> None:
 
 # ---------- помещения ----------
 ROOM_FIELDS = ["map_id", "name", "room_type", "x1", "y1", "x2", "y2", "area", "height", "windows",
-               "hours_per_day", "days_per_month", "months_per_year", "has_sensor", "note"]
+               "hours_per_day", "days_per_month", "months_per_year", "has_sensor", "note",
+               "win_count", "win_len", "win_area", "door_count", "openings"]
 
 
 def rooms(map_id: int | None = None) -> list[dict]:

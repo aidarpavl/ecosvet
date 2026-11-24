@@ -50,6 +50,15 @@ def settings_tab():
         u = c[1].number_input("Коэф. использования U", 0.1, 1.0, float(s["util_factor"]), 0.05)
         mf = c[2].number_input("Коэф. эксплуатации MF", 0.3, 1.0, float(s["maint_factor"]), 0.05)
         co2 = c[3].number_input("CO₂, кг/кВт·ч", 0.0, 2.0, float(s["co2_factor"]), 0.05)
+        st.markdown("**🪟 Естественное освещение (окна)**")
+        c = st.columns(6)
+        wh = c[0].number_input("Высота окна, м", 0.5, 4.0, float(s["window_height"]), 0.1)
+        gt = c[1].number_input("Светопропускание T", 0.2, 0.95, float(s["glazing_t"]), 0.05)
+        sa = c[2].number_input("Угол неба θ, °", 10.0, 90.0, float(s["sky_angle"]), 5.0)
+        rf = c[3].number_input("Отражение R", 0.1, 0.9, float(s["reflectance"]), 0.05)
+        el = c[4].number_input("Наружная освещённость, лк", 1000.0, 50000.0, float(s["ext_lux"]), 500.0)
+        df_ = c[5].number_input("Доля светлых часов", 0.0, 1.0, float(s["day_frac"]), 0.05,
+                                help="Какая доля часов работы освещения приходится на светлое время суток")
         st.markdown("**LED-замены для расчёта экономии**")
         c = st.columns(3)
         d = c[0].selectbox("Обычные помещения", ids, index=idx("led_default"), format_func=nm.get) if ids else None
@@ -57,7 +66,8 @@ def settings_tab():
         hb = c[2].selectbox("Спортзал / актовый зал", ids, index=idx("led_highbay"), format_func=nm.get) if ids else None
         if st.form_submit_button("💾 Сохранить", type="primary"):
             for k, v in {"school_name": name, "tariff": tariff, "util_factor": u, "maint_factor": mf, "co2_factor": co2,
-                         "led_default": d, "led_small": sm, "led_highbay": hb}.items():
+                         "led_default": d, "led_small": sm, "led_highbay": hb, "window_height": wh, "glazing_t": gt,
+                         "sky_angle": sa, "reflectance": rf, "ext_lux": el, "day_frac": df_}.items():
                 if v is not None:
                     db.set_setting(k, v)
             st.success("Сохранено")

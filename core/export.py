@@ -14,6 +14,8 @@ PASSPORT_COLS = {
     "eff_class": "Класс", "w_per_m2": "Вт/м²", "hours_per_day": "Часов/день", "days_per_month": "Дней/мес",
     "months_per_year": "Мес/год", "kwh_day": "кВт·ч/день", "kwh_month": "кВт·ч/мес", "kwh_year": "кВт·ч/год",
     "cost_day": "₸/день", "cost_month": "₸/мес", "cost_year": "₸/год", "co2_year": "CO₂, кг/год",
+    "win_count": "Окон", "win_len": "Ширина окон, м", "win_area": "Остекление, м²", "door_count": "Дверей",
+    "df_pct": "КЕО, %", "lux_nat": "Дневной свет, лк", "daylight_pct": "Экономия от окон, %",
 }
 
 

@@ -59,6 +59,18 @@ def render():
     e[1].metric("В месяц", f"{fmt(m['kwh_month'], 1)} кВт·ч", f"{fmt(m['cost_month'], 0)} ₸", delta_color="off")
     e[2].metric("В год", f"{fmt(m['kwh_year'], 0)} кВт·ч", f"{fmt(m['cost_year'], 0)} ₸", delta_color="off")
     e[3].metric("CO₂ в год", f"{fmt(m['co2_year'], 0)} кг")
+    st.markdown("**🪟 Естественное освещение** (окна и двери распознаны по плану)")
+    d = st.columns(6)
+    d[0].metric("Окон", m["win_count"], f"{fmt(m['win_len'], 1)} м по стене", delta_color="off")
+    d[1].metric("Дверей", m["door_count"])
+    d[2].metric("Площадь остекления", f"{fmt(m['win_area'], 1)} м²",
+                f"СК 1:{1 / m['glazing_ratio']:.1f}" if m["glazing_ratio"] else "окон нет", delta_color="off")
+    keo_delta = (f"норма {m['keo_norm']} % — {'✅ выполнена' if m['keo_ok'] else '❌ не выполнена'}"
+                 if m["keo_norm"] is not None else "норма не задана")
+    d[3].metric("КЕО", f"{m['df_pct']:.2f} %", keo_delta, delta_color="off")
+    d[4].metric("Дневной свет", f"{m['lux_nat']:.0f} лк", f"днём всего {m['lux_day_total']:.0f} лк", delta_color="off")
+    d[5].metric("Экономия от окон", f"{m['daylight_pct']:.0f} %", f"≈ {fmt(m['cost_year'] * m['daylight_pct'] / 100, 0)} ₸/год",
+                delta_color="off")
     if m["need_lamps"] is not None and m["main_lamp"]:
         st.caption(f"По норме {m['norm_lux']:.0f} лк нужно ≈ **{m['need_lamps']}** светильников «{m['main_lamp']}» "
                    f"(сейчас {m['n_lamps']}). Формула: N = ⌈E·S / (Φ·U·MF)⌉, U={settings['util_factor']}, "
@@ -96,6 +108,13 @@ def params_tab(room, map_id):
         months = c[0].number_input("Месяцев в году", 0.0, 12.0, float(room["months_per_year"] or 0), 1.0, disabled=dis)
         windows = c[1].checkbox("Есть окна (дневной свет)", bool(room["windows"]), disabled=dis)
         sensor = c[2].checkbox("Есть датчик движения / таймер", bool(room["has_sensor"]), disabled=dis)
+        st.markdown("**🪟 Окна и двери** (заполняются распознаванием по плану; можно поправить вручную)")
+        c = st.columns(4)
+        win_count = c[0].number_input("Окон, шт", 0, 200, int(room["win_count"] or 0), disabled=dis)
+        win_len = c[1].number_input("Суммарная ширина окон, м", 0.0, 500.0, float(room["win_len"] or 0), 0.1, disabled=dis)
+        win_area = c[2].number_input("Площадь остекления, м² (0 = ширина × высота окна)", 0.0, 1000.0,
+                                     float(room["win_area"] or 0), 0.1, disabled=dis)
+        door_count = c[3].number_input("Дверей, шт", 0, 50, int(room["door_count"] or 0), disabled=dis)
         note = st.text_area("Примечание", room["note"] or "", disabled=dis)
         with st.expander("Контур на карте (пиксели плана)"):
             cc = st.columns(4)
@@ -104,13 +123,18 @@ def params_tab(room, map_id):
         if st.form_submit_button("💾 Сохранить", type="primary", disabled=dis):
             upd = {"name": name, "room_type": rtype, "area": area, "height": height, "hours_per_day": hours,
                    "days_per_month": days, "months_per_year": months, "windows": int(windows),
-                   "has_sensor": int(sensor), "note": note}
+                   "has_sensor": int(sensor), "note": note, "win_count": win_count, "win_len": win_len,
+                   "win_area": win_area, "door_count": door_count}
             if any(box):
                 upd.update(dict(zip(("x1", "y1", "x2", "y2"), box)))
             db.update_room(room["id"], upd)
             st.success("Сохранено")
             st.rerun()
     if is_admin():
+        if room["x1"] is not None and st.button("🔍 Распознать окна и двери по плану заново"):
+            r = service.detect_room(room)
+            st.success(f"Найдено окон: {r.get('win_count', 0)}, дверей: {r.get('door_count', 0)}")
+            st.rerun()
         with st.popover("🗑️ Удалить помещение"):
             st.warning("Будут удалены помещение и все его лампы.")
             if st.button("Да, удалить", type="primary", key=f"del_room_{room['id']}"):

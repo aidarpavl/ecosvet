@@ -1,6 +1,7 @@
 """Отрисовка энергокарты поверх плана эвакуации (Pillow)."""
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -48,7 +49,7 @@ def original_size(map_row: dict) -> tuple[int, int]:
 
 def render(map_row: dict, rooms: list[dict], lamps: list[dict], metrics: dict[int, dict],
            selected_room: int | None = None, pending: tuple | None = None,
-           show_rooms=True, show_lamps=True, show_labels=True) -> Image.Image:
+           show_rooms=True, show_lamps=True, show_labels=True, show_openings=True) -> Image.Image:
     img = base_image(map_row).convert("RGBA")
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
@@ -64,6 +65,17 @@ def render(map_row: dict, rooms: list[dict], lamps: list[dict], metrics: dict[in
                    max(r["x1"], r["x2"]) * S, max(r["y1"], r["y2"]) * S]
             sel = r["id"] == selected_room
             d.rectangle(box, fill=col + ((95 if sel else 55),), outline=col + (255,), width=4 if sel else 2)
+
+    if show_openings:
+        for r in rooms:
+            try:
+                op = json.loads(r.get("openings") or "{}")
+            except ValueError:
+                op = {}
+            for seg in op.get("windows", []):
+                d.line([v * S for v in seg], fill=(0, 190, 255, 255), width=6)
+            for seg in op.get("doors", []):
+                d.line([v * S for v in seg], fill=(150, 75, 0, 255), width=6)
 
     if show_lamps:
         for l in lamps:

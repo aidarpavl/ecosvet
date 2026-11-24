@@ -10,6 +10,14 @@
 Стоимость:                   C = W · тариф
 Выбросы CO₂:                 CO₂ = W_год · k_сети
 Удельная мощность:           p = P / S, Вт/м²;  на 100 лк: p₁₀₀ = p / (E/100)
+
+Естественное освещение (окна распознаются на плане, см. core/openings.py):
+Площадь остекления:          Aок = Σ длина окон × высота окна
+Световой коэффициент:        СК = Aок / S   (ориентир для классов 1:4 – 1:6)
+КЕО (средний, формула BRE):  КЕО = T · Aок · θ° / (Aпов · (1 − R²)), % (θ — в градусах),
+                             Aпов = 2(L·W + L·H + W·H) — площадь всех поверхностей помещения
+Дневная освещённость:        Eест = КЕО/100 · Eнаруж
+Экономия за счёт дневного света: доля = доля_светлых_часов · min(1, Eест / Eнорм)
 """
 from __future__ import annotations
 
@@ -30,6 +38,12 @@ STATUS_LABEL = {
     "no_lamps": "⚪ Нет ламп",
     "no_area": "⚪ Не указана площадь",
 }
+
+# Ориентировочные нормы КЕО при боковом освещении, % (сверьте с СП РК по естественному освещению)
+KEO_NORMS = {"Кабинет": 1.5, "Лаборатория": 1.5, "Компьютерный класс": 1.5, "Мастерская / робототехника": 1.5,
+             "Актовый зал": 1.0, "Спортзал": 1.0, "Учительская": 1.0, "Администрация": 1.0,
+             "Медицинский кабинет": 1.0, "Столовая": 1.0, "Лаборантская": 1.0, "Пищеблок": 1.0,
+             "Коридор / рекреация": 0.2, "Холл / вестибюль": 0.2}
 
 EFF_CLASSES = [(3.0, "A"), (4.5, "B"), (6.0, "C"), (8.0, "D")]
 
@@ -89,6 +103,36 @@ def status_of(pct: float | None, n: int, area: float) -> str:
     return "ok"
 
 
+def daylight(room: dict, settings: dict, norm_lux: float) -> dict:
+    """Естественная освещённость помещения по окнам."""
+    area = fnum(room.get("area"))
+    h = fnum(room.get("height"), 3.0) or 3.0
+    win_len = fnum(room.get("win_len"))
+    win_area = fnum(room.get("win_area")) or win_len * fnum(settings.get("window_height"), 1.8)
+    out = {"win_count": int(fnum(room.get("win_count"))), "win_len": win_len, "win_area": win_area,
+           "door_count": int(fnum(room.get("door_count"))), "glazing_ratio": 0.0, "df_pct": 0.0,
+           "lux_nat": 0.0, "daylight_pct": 0.0, "keo_norm": KEO_NORMS.get(room.get("room_type"))}
+    if win_area <= 0 or area <= 0:
+        out["keo_ok"] = None if out["keo_norm"] is None else False
+        return out
+    k = 1.0
+    if room.get("x1") is not None and room.get("y2") is not None:
+        wpx, hpx = abs(fnum(room["x2"]) - fnum(room["x1"])), abs(fnum(room["y2"]) - fnum(room["y1"]))
+        k = wpx / hpx if wpx > 0 and hpx > 0 else 1.0
+    L = math.sqrt(area * k)
+    W = area / L
+    a_tot = 2 * (L * W + L * h + W * h)
+    T, theta = fnum(settings.get("glazing_t"), 0.65), fnum(settings.get("sky_angle"), 70)
+    R = fnum(settings.get("reflectance"), 0.5)
+    df = T * win_area * theta / (a_tot * (1 - R * R))   # θ в градусах → результат сразу в %
+    lux_nat = df / 100 * fnum(settings.get("ext_lux"), 10000)
+    share = min(1.0, lux_nat / norm_lux) if norm_lux > 0 else 0.0
+    out.update(glazing_ratio=win_area / area, df_pct=df, lux_nat=lux_nat,
+               daylight_pct=fnum(settings.get("day_frac"), 0.4) * share * 100,
+               keo_ok=None if out["keo_norm"] is None else df >= out["keo_norm"])
+    return out
+
+
 def room_metrics(room: dict, lamps: list[dict], norms: dict, settings: dict) -> dict:
     """Полный набор показателей паспорта помещения."""
     u, mf = fnum(settings.get("util_factor"), 0.5), fnum(settings.get("maint_factor"), 0.8)
@@ -105,10 +149,12 @@ def room_metrics(room: dict, lamps: list[dict], norms: dict, settings: dict) -> 
     main = max(lamps, key=lambda l: fnum(l["lumens"]) * int(fnum(l.get("qty"), 1)), default=None)
     need = lamps_needed(norm, area, fnum(main["lumens"]), u, mf) if main else None
     wpm2 = t["watts"] / area if area > 0 else 0.0
+    dl = daylight(room, settings, norm)
     w100 = wpm2 / (lux / 100) if lux > 0 else None
     return {
         "room_id": room.get("id"), "map_id": room.get("map_id"), "name": room.get("name"),
-        "room_type": room.get("room_type"), "area": area, "windows": int(fnum(room.get("windows"))),
+        "room_type": room.get("room_type"), "area": area,
+        "windows": int(fnum(room.get("windows")) or fnum(room.get("win_count")) > 0),
         "has_sensor": int(fnum(room.get("has_sensor"))),
         "hours_per_day": fnum(room.get("hours_per_day")), "days_per_month": fnum(room.get("days_per_month")),
         "months_per_year": fnum(room.get("months_per_year")),
@@ -122,6 +168,7 @@ def room_metrics(room: dict, lamps: list[dict], norms: dict, settings: dict) -> 
         **e,
         "cost_day": e["kwh_day"] * tariff, "cost_month": e["kwh_month"] * tariff,
         "cost_year": e["kwh_year"] * tariff, "co2_year": e["kwh_year"] * co2k,
+        **dl, "lux_day_total": lux + dl["lux_nat"],
         "lamps": lamps,
     }
 
@@ -155,7 +202,7 @@ def pick_led(room: dict, led_types: list[dict], settings: dict) -> dict | None:
     return min(led_types, key=lambda x: abs(fnum(x["lumens"]) - target))
 
 
-def simulate(metrics: list[dict], led_types: list[dict], settings: dict, *, led=False, to_norm=True,
+def simulate(metrics: list[dict], led_types: list[dict], settings: dict, *, led=False, to_norm=True,  # noqa: C901
              sensors=False, sensor_pct=30.0, daylight=False, daylight_pct=15.0, hours_cut=0.0,
              sensor_price=6000.0) -> dict:
     """Сценарий экономии. Возвращает построчный результат и итоги."""
@@ -183,8 +230,9 @@ def simulate(metrics: list[dict], led_types: list[dict], settings: dict, *, led=
         if sensors and not m["has_sensor"] and m["room_type"] in SENSOR_TYPES and m["n_lamps"]:
             hours *= 1 - sensor_pct / 100
             invest += max(1, math.ceil(m["area"] / 30)) * sensor_price
-        if daylight and m["windows"]:
-            hours *= 1 - daylight_pct / 100
+        if daylight:
+            pct = m.get("daylight_pct", 0.0) if m.get("win_area", 0) > 0 else (daylight_pct if m["windows"] else 0.0)
+            hours *= 1 - pct / 100
         kwh_after = power_w / 1000 * hours * m["days_per_month"] * m["months_per_year"]
         save_kwh = m["kwh_year"] - kwh_after
         save_tg = save_kwh * tariff

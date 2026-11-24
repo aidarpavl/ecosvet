@@ -57,7 +57,7 @@ def render():
     ss = st.session_state
     ss.setdefault("click_nonce", 0)
     ss.setdefault("map_tool", "select")
-    top = st.columns([2, 1, 1, 1, 1])
+    top = st.columns([2, 1, 1, 1, 1, 1])
     with top[0]:
         map_id = pick_map("maps_map")
     if map_id is None:
@@ -65,7 +65,8 @@ def render():
     show_rooms = top[1].toggle("Контуры", True)
     show_lamps = top[2].toggle("Лампы", True)
     show_labels = top[3].toggle("Подписи", True)
-    disp_w = top[4].select_slider("Масштаб", [700, 850, 1000, 1150, 1300], value=ss.get("disp_w", 1000), key="disp_w")
+    show_open = top[4].toggle("Окна/двери", True)
+    disp_w = top[5].select_slider("Масштаб", [700, 850, 1000, 1150, 1300], value=ss.get("disp_w", 1000), key="disp_w")
     if ss.get("last_map") != map_id:
         ss["last_map"], ss["sel_room"], ss["rect_p1"], ss["rect_box"] = map_id, None, None, None
 
@@ -86,6 +87,11 @@ def render():
                 tc[2].button("✖ Сбросить угол", on_click=lambda: ss.update(rect_p1=None))
         elif tool == "erase":
             tc[1].caption("Кликните рядом с лампой — будет удалена ближайшая (радиус 25 px).")
+        if tc[2].button("🔍 Распознать окна и двери", help="Найти окна и двери на стенах всех помещений плана "
+                                                          "по условным знакам"):
+            n = service.detect_map(map_id)
+            _flash(f"Распознано окон на плане: {n}. Проверьте и при необходимости поправьте в паспортах.")
+            st.rerun()
     else:
         st.caption("🔎 Кликните по помещению, чтобы увидеть его паспорт. Редактирование доступно только администратору.")
 
@@ -97,7 +103,7 @@ def render():
     rooms = db.rooms(map_id)
     img = mapdraw.render(mp, rooms, db.lamps(map_id=map_id), metrics, selected_room=ss.get("sel_room"),
                          pending=ss.get("rect_p1"), show_rooms=show_rooms, show_lamps=show_lamps,
-                         show_labels=show_labels)
+                         show_labels=show_labels, show_openings=show_open)
     W0, H0 = mapdraw.original_size(mp)
 
     left, right = st.columns([3, 1])
@@ -123,7 +129,8 @@ def render():
                 if c[2].form_submit_button("Применить инструмент"):
                     handle_click(tool, map_id, x, y)
                     st.rerun()
-        st.caption(f"Статус помещения: {status_legend()}  \n{TECH_LEGEND}")
+        st.caption(f"Статус помещения: {status_legend()}  \n{TECH_LEGEND}  \n"
+                   "🟦 голубая линия — окно · 🟫 коричневая — дверь (распознаны по плану)")
 
     with right:
         if ss.get("rect_box") and is_admin():
@@ -139,6 +146,8 @@ def render():
             st.metric("Мощность", f"{m['power_w']:.0f} Вт", f"{fmt(m['power_kw'], 3)} кВт", delta_color="off")
             st.metric("Стоимость", f"{fmt(m['cost_year'], 0)} ₸/год", f"{fmt(m['cost_month'], 0)} ₸/мес",
                       delta_color="off")
+            st.metric("Окна / двери", f"{m['win_count']} / {m['door_count']}",
+                      f"КЕО {m['df_pct']:.2f} % · дневной свет {m['lux_nat']:.0f} лк", delta_color="off")
             st.button("📋 Открыть паспорт", type="primary", use_container_width=True, on_click=goto,
                       args=("📋 Паспорт кабинета",), kwargs={"pass_map": map_id, "pass_room": sel})
         else:
@@ -148,6 +157,8 @@ def render():
     df = pd.DataFrame([{"Помещение": m["name"], "Тип": m["room_type"], "м²": round(m["area"], 1),
                         "Ламп": m["n_lamps"], "Вт": round(m["power_w"]), "лк": round(m["lux"]),
                         "Норма": round(m["norm_lux"]), "Статус": STATUS_LABEL[m["status"]],
+                        "Окон": m["win_count"], "Дверей": m["door_count"], "КЕО, %": round(m["df_pct"], 2),
+                        "Дневной свет, лк": round(m["lux_nat"]),
                         "кВт·ч/год": round(m["kwh_year"]), "₸/год": round(m["cost_year"])}
                        for m in metrics.values()])
     st.dataframe(df, hide_index=True, use_container_width=True)
@@ -163,6 +174,7 @@ def rect_form(map_id: int):
         if st.button(f"Применить к «{r['name']}»", type="primary"):
             db.update_room(r["id"], dict(zip(("x1", "y1", "x2", "y2"), box)))
             db.reassign_lamps_in_room_box(db.get_room(r["id"]))
+            service.detect_room(db.get_room(r["id"]))
             ss["rect_box"] = None
             _flash("Контур обновлён")
             st.rerun()
@@ -175,6 +187,7 @@ def rect_form(map_id: int):
                 rid = db.add_room({"map_id": map_id, "name": name, "room_type": rtype, "x1": box[0], "y1": box[1],
                                    "x2": box[2], "y2": box[3], "area": area})
                 db.reassign_lamps_in_room_box(db.get_room(rid))
+                service.detect_room(db.get_room(rid))
                 ss["rect_box"], ss["sel_room"] = None, rid
                 _flash(f"Помещение «{name}» создано. Теперь добавьте лампы карандашом.")
                 st.rerun()
