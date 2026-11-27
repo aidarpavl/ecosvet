@@ -2073,15 +2073,6 @@
    "qty": 1
   },
   {
-   "id": 8,
-   "room_id": 2,
-   "map_id": 1,
-   "lamp_type_id": 5,
-   "x": 387.2,
-   "y": 102.5,
-   "qty": 1
-  },
-  {
    "id": 9,
    "room_id": 2,
    "map_id": 1,
