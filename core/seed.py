@@ -183,7 +183,7 @@ RENAMES = {'Кабинет 101': 'Кабинет №5',
     'Кабинет С-3': 'Кабинет №18',
     'Кабинет С-4': 'Кабинет №19'}
 RETYPES = {"Кабинет №2": "Кабинет", "Кабинет №1": "Кабинет", "Кабинет технологии": "Мастерская / робототехника"}
-DATA_VERSION = 2
+DATA_VERSION = 3
 
 
 def grid_points(box, n):
@@ -248,10 +248,18 @@ def migrate() -> None:
         for r in db.rooms():
             if r["x1"] is not None and not r.get("openings"):
                 service.detect_room(r)
+    if ver < 3:
+        db.place_unplaced_lamps()        # лампы, добавленные в паспорте без точки, — на карту
     db.set_setting("data_version", DATA_VERSION)
 
 
-def ensure_seed() -> None:
+def ensure_seed(secrets: dict | None = None) -> None:
+    """Пустая база: сначала пробуем восстановить сохранённый снимок, иначе — начальные данные."""
     if db.init_db():
-        seed()
+        restored = None
+        if secrets is not None:
+            from . import storage
+            restored = storage.restore(secrets)
+        if not restored:
+            seed()
     migrate()

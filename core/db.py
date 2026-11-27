@@ -140,9 +140,14 @@ def q1(sql: str, params=()) -> dict | None:
     return rows[0] if rows else None
 
 
+# Флаг «есть изменения, ещё не отправленные в постоянное хранилище» (см. core/storage.py)
+DIRTY = {"flag": False}
+
+
 def ex(sql: str, params=()) -> int:
     with conn() as c:
         cur = c.execute(sql, params)
+        DIRTY["flag"] = True
         return cur.lastrowid
 
 
@@ -289,6 +294,11 @@ def lamps(map_id: int | None = None, room_id: int | None = None) -> list[dict]:
 
 
 def add_lamp(map_id: int, room_id: int | None, lamp_type_id: int, x=None, y=None, qty: int = 1) -> int:
+    """Если координаты не заданы — лампа сама ставится на свободное место в контуре помещения (видна на карте)."""
+    if x is None and room_id is not None:
+        r = get_room(room_id)
+        if r and r["x1"] is not None:
+            x, y = free_points(r, 1)[0]
     return ex("INSERT INTO lamps(map_id, room_id, lamp_type_id, x, y, qty) VALUES (?,?,?,?,?,?)",
               (map_id, room_id, lamp_type_id, x, y, int(qty)))
 
@@ -299,6 +309,48 @@ def update_lamp(lamp_id: int, lamp_type_id: int, qty: int) -> None:
 
 def delete_lamp(lamp_id: int) -> None:
     ex("DELETE FROM lamps WHERE id=?", (lamp_id,))
+
+
+def free_points(room: dict, n: int, taken: list[tuple] | None = None) -> list[tuple]:
+    """n свободных точек внутри контура помещения — подальше от уже стоящих ламп."""
+    if room.get("x1") is None or n <= 0:
+        return [(None, None)] * max(n, 0)
+    from .seed import grid_points
+    box = (min(room["x1"], room["x2"]), min(room["y1"], room["y2"]),
+           max(room["x1"], room["x2"]), max(room["y1"], room["y2"]))
+    taken = list(taken if taken is not None else
+                 [(l["x"], l["y"]) for l in lamps(room_id=room["id"]) if l["x"] is not None])
+    cand = grid_points(box, max(16, (len(taken) + n) * 3))
+    out = []
+    for _ in range(n):
+        best = max(cand, key=lambda p: min(((p[0] - t[0]) ** 2 + (p[1] - t[1]) ** 2 for t in taken), default=1e9))
+        out.append(best)
+        taken.append(best)
+    return out
+
+
+def place_unplaced_lamps(room_id: int | None = None) -> int:
+    """Лампам без точки на карте назначает место внутри контура их помещения."""
+    n = 0
+    for r in ([get_room(room_id)] if room_id else rooms()):
+        if not r or r["x1"] is None:
+            continue
+        loose = [l for l in lamps(room_id=r["id"]) if l["x"] is None]
+        for l, (x, y) in zip(loose, free_points(r, len(loose))):
+            ex("UPDATE lamps SET x=?, y=? WHERE id=?", (x, y, l["id"]))
+            n += 1
+    return n
+
+
+def apply_lamp_changes(adds: list[dict], deletes: list[int]) -> None:
+    """Применяет черновик правок карты одной транзакцией."""
+    with conn() as c:
+        for lid in deletes:
+            c.execute("DELETE FROM lamps WHERE id=?", (lid,))
+        for a in adds:
+            c.execute("INSERT INTO lamps(map_id, room_id, lamp_type_id, x, y, qty) VALUES (?,?,?,?,?,?)",
+                      (a["map_id"], a["room_id"], a["lamp_type_id"], a["x"], a["y"], int(a["qty"])))
+    DIRTY["flag"] = True
 
 
 def nearest_lamp(map_id: int, x: float, y: float, max_dist: float = 25) -> dict | None:
@@ -358,7 +410,7 @@ def delete_feedback(fid: int) -> None:
 
 
 # ---------- резервная копия ----------
-BACKUP_TABLES = ["maps", "lamp_types", "norms", "rooms", "lamps", "settings", "swot_items", "feedback"]
+BACKUP_TABLES = ["users", "maps", "lamp_types", "norms", "rooms", "lamps", "settings", "swot_items", "feedback"]
 
 
 def export_json() -> str:
@@ -380,3 +432,4 @@ def import_json(text: str) -> None:
                 c.execute(f"INSERT INTO {t}({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
                           tuple(row[k] for k in cols))
         c.execute("PRAGMA foreign_keys = ON")
+    DIRTY["flag"] = True

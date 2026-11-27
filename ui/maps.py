@@ -2,9 +2,9 @@
 import pandas as pd
 import streamlit as st
 
-from core import db, mapdraw, service
+from core import db, mapdraw, service, storage
 from core.calc import STATUS_LABEL, fmt
-from ui.common import TECH_LEGEND, goto, is_admin, pick_map, status_legend
+from ui.common import TECH_LEGEND, goto, is_admin, pick_map, secrets, status_legend
 
 try:
     from streamlit_image_coordinates import streamlit_image_coordinates as image_coords
@@ -23,6 +23,87 @@ def _flash(msg, kind="success"):
     st.session_state["map_flash"] = (kind, msg)
 
 
+# ---------- правки карты: сразу в базу + «Отменить последнее» + «Сохранить» ----------
+def _undo_stack() -> list:
+    return st.session_state.setdefault("map_undo", [])
+
+
+def add_lamp_now(map_id: int, room: dict, type_id: int, x, y, qty: int) -> None:
+    lid = db.add_lamp(map_id, room["id"], type_id, x, y, qty)
+    _undo_stack().append(("add", lid))
+    st.session_state["sel_room"] = room["id"]
+
+
+def delete_lamp_now(lamp: dict) -> None:
+    db.delete_lamp(lamp["id"])
+    _undo_stack().append(("del", {k: lamp[k] for k in ("map_id", "room_id", "lamp_type_id", "x", "y", "qty")}))
+
+
+def undo_last() -> None:
+    stack = _undo_stack()
+    if not stack:
+        return
+    op, data = stack.pop()
+    if op == "add":
+        db.delete_lamp(data)
+        _flash("↩️ Отменено: добавление лампы.", "info")
+    else:
+        db.apply_lamp_changes([data], [])
+        _flash("↩️ Отменено: удаление лампы (лампа возвращена).", "info")
+
+
+def save_all() -> None:
+    ok, msg = storage.persist(secrets(), force=True)
+    st.session_state["map_undo"] = []
+    _flash(("✅ " if ok else "⚠️ ") + msg, "success" if ok else "warning")
+
+
+def toolbar(map_id: int, where: str) -> None:
+    """Кнопки «Сохранить» и «Отменить последнее» (над и под картой)."""
+    n = len(_undo_stack())
+    c = st.columns([2, 2, 4])
+    c[0].button("💾 Сохранить", type="primary", use_container_width=True, on_click=save_all, key=f"save_{where}")
+    c[1].button(f"↩️ Отменить последнее ({n})" if n else "↩️ Отменить последнее", disabled=not n,
+                use_container_width=True, on_click=undo_last, key=f"undo_{where}")
+    if where == "top":
+        c[2].caption("Каждое действие карандашом и ластиком сразу записывается в базу. "
+                     "«💾 Сохранить» дополнительно сохраняет копию данных в облако (GitHub), чтобы ничего не пропало "
+                     "после перезапуска приложения.")
+
+
+def manual_panel(map_id: int) -> None:
+    """Правка ламп без клика по карте — выбрать помещение из списка."""
+    rooms = db.rooms(map_id)
+    if not rooms:
+        return
+    with st.expander("✏️ Добавить / удалить лампы без клика по карте", expanded=False):
+        ids = [r["id"] for r in rooms]
+        names = {r["id"]: r["name"] for r in rooms}
+        sel = st.session_state.get("sel_room")
+        rid = st.selectbox("Помещение", ids, index=ids.index(sel) if sel in ids else 0, format_func=names.get,
+                           key=f"man_room_{map_id}")
+        room = db.get_room(rid)
+        types = db.lamp_types()
+        tn = {t["id"]: f"{t['name']} — {t['watts']:g} Вт, {t['lumens']:g} лм" for t in types}
+        c = st.columns([3, 1, 1])
+        tid = c[0].selectbox("Тип лампы", list(tn), format_func=tn.get, key=f"man_type_{map_id}")
+        q = c[1].number_input("Кол-во", 1, 50, 1, key=f"man_qty_{map_id}")
+        if c[2].button("➕ Добавить", key=f"man_add_{map_id}", use_container_width=True):
+            add_lamp_now(map_id, room, tid, None, None, q)   # точка ставится автоматически внутри контура
+            _flash(f"💡 Лампа добавлена в «{room['name']}» и сохранена.")
+            st.rerun()
+        lamps = db.lamps(room_id=rid)
+        if not lamps:
+            st.caption("В помещении нет ламп.")
+        for l in lamps:
+            a, b = st.columns([5, 1])
+            a.write(f"💡 {l['type_name']} × {l['qty']} — {l['watts'] * l['qty']:g} Вт")
+            if b.button("🗑️", key=f"man_del_{l['id']}"):
+                delete_lamp_now(l)
+                _flash(f"🧽 Лампа «{l['type_name']}» удалена и сохранена.")
+                st.rerun()
+
+
 def handle_click(tool: str, map_id: int, x: float, y: float):
     ss = st.session_state
     if tool == "select" or not is_admin():
@@ -34,14 +115,13 @@ def handle_click(tool: str, map_id: int, x: float, y: float):
         if not r:
             _flash("Точка вне помещений. Кликните внутри контура или сначала разметьте помещение.", "warning")
             return
-        db.add_lamp(map_id, r["id"], ss["pencil_type"], round(x, 1), round(y, 1), ss.get("pencil_qty", 1))
-        ss["sel_room"] = r["id"]
-        _flash(f"💡 Лампа добавлена в «{r['name']}»")
+        add_lamp_now(map_id, r, ss["pencil_type"], round(x, 1), round(y, 1), int(ss.get("pencil_qty", 1)))
+        _flash(f"💡 Лампа добавлена в «{r['name']}» и записана в базу.")
     elif tool == "erase":
-        l = db.nearest_lamp(map_id, x, y)
-        if l:
-            db.delete_lamp(l["id"])
-            _flash(f"🧽 Удалена лампа «{l['type_name']}»")
+        best = db.nearest_lamp(map_id, x, y)
+        if best:
+            delete_lamp_now(best)
+            _flash(f"🧽 Удалена лампа «{best['type_name']}» — изменение записано в базу.")
         else:
             _flash("Рядом с точкой нет ламп.", "warning")
     elif tool == "rect":
@@ -95,13 +175,21 @@ def render():
     else:
         st.caption("🔎 Кликните по помещению, чтобы увидеть его паспорт. Редактирование доступно только администратору.")
 
+    if is_admin():
+        toolbar(map_id, "top")
+        if storage.mode(secrets()) != "github":
+            st.warning("☁️ Облачное сохранение не настроено: в базе правки сохраняются, но на Streamlit Cloud "
+                       "они пропадут при перезапуске приложения. Добавьте GITHUB_TOKEN и GITHUB_REPO в Secrets "
+                       "(инструкция в README) или скачивайте копию в «Администрирование → Резервная копия».")
+
     if "map_flash" in ss:
         kind, msg = ss.pop("map_flash")
         getattr(st, kind)(msg)
 
+    lamps_now = db.lamps(map_id=map_id)
     metrics = {m["room_id"]: m for m in service.compute_all(map_id)}
     rooms = db.rooms(map_id)
-    img = mapdraw.render(mp, rooms, db.lamps(map_id=map_id), metrics, selected_room=ss.get("sel_room"),
+    img = mapdraw.render(mp, rooms, lamps_now, metrics, selected_room=ss.get("sel_room"),
                          pending=ss.get("rect_p1"), show_rooms=show_rooms, show_lamps=show_lamps,
                          show_labels=show_labels, show_openings=show_open)
     W0, H0 = mapdraw.original_size(mp)
@@ -121,7 +209,9 @@ def render():
                     st.rerun()
         else:
             st.image(img, width=disp_w)
-            st.info("Для кликов по карте установите `streamlit-image-coordinates`. Пока — ручной ввод координат.")
+            st.error("Клики по карте не работают: не установлен пакет `streamlit-image-coordinates` "
+                     "(проверьте, что он есть в requirements.txt). Пока используйте ввод координат "
+                     "или панель «✏️ Добавить / удалить лампы без клика по карте» ниже.")
             with st.form("manual_click"):
                 c = st.columns(3)
                 x = c[0].number_input("X (px плана)", 0.0, float(W0), W0 / 2)
@@ -131,6 +221,9 @@ def render():
                     st.rerun()
         st.caption(f"Статус помещения: {status_legend()}  \n{TECH_LEGEND}  \n"
                    "🟦 голубая линия — окно · 🟫 коричневая — дверь (распознаны по плану)")
+        if is_admin():
+            toolbar(map_id, "bottom")
+            manual_panel(map_id)
 
     with right:
         if ss.get("rect_box") and is_admin():

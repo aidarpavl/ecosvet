@@ -7,10 +7,11 @@ from . import db, openings
 from .calc import room_metrics
 
 
-def compute_all(map_id: int | None = None) -> list[dict]:
+def compute_all(map_id: int | None = None, lamps: list[dict] | None = None) -> list[dict]:
+    """Показатели помещений. lamps — свой список ламп (например, с несохранёнными правками карты)."""
     settings, norms = db.get_settings(), db.norms()
     by_room = defaultdict(list)
-    for l in db.lamps(map_id=map_id):
+    for l in (lamps if lamps is not None else db.lamps(map_id=map_id)):
         if l["room_id"] is not None:
             by_room[l["room_id"]].append(l)
     return [room_metrics(r, by_room.get(r["id"], []), norms, settings) for r in db.rooms(map_id)]

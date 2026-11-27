@@ -4,11 +4,11 @@ import math
 import pandas as pd
 import streamlit as st
 
-from core import db, service
+from core import db, service, storage
 from core.calc import STATUS_LABEL, fmt
 from core.export import lamps_df, metrics_df, to_excel
 from core.swot import PRIO, room_recommendations
-from ui.common import admin_only_note, is_admin, pick_map, pick_room
+from ui.common import admin_only_note, is_admin, pick_map, pick_room, secrets
 
 
 def render():
@@ -161,9 +161,12 @@ def lamps_tab(room, m):
     if not is_admin():
         st.dataframe(df.drop(columns=["id"]), hide_index=True, use_container_width=True)
         return
-    st.markdown("**Редактирование** (меняйте тип и количество, удаляйте строки, добавляйте новые — без точки на карте)")
+    st.markdown("**Редактирование** (меняйте тип и количество, удаляйте строки, добавляйте новые — они сами встанут на карту). Затем нажмите «💾 Сохранить лампы»")
+    ver = st.session_state.get(f"lamps_ver_{room['id']}", 0)   # новая версия → таблица сбрасывается после сохранения
+    if "lamps_saved_msg" in st.session_state:
+        st.success(st.session_state.pop("lamps_saved_msg"))
     edited = st.data_editor(
-        df, key=f"lamps_ed_{room['id']}", num_rows="dynamic", hide_index=True, use_container_width=True,
+        df, key=f"lamps_ed_{room['id']}_{ver}", num_rows="dynamic", hide_index=True, use_container_width=True,
         disabled=["id", "Вт/шт", "лм/шт", "Вт всего", "кВт всего", "лм всего", "На карте"],
         column_config={"Светильник": st.column_config.SelectboxColumn(options=list(by_name), required=True),
                        "Кол-во": st.column_config.NumberColumn(min_value=1, max_value=500, step=1, required=True)})
@@ -183,7 +186,9 @@ def lamps_tab(room, m):
                 db.add_lamp(room["map_id"], room["id"], t["id"], None, None, int(qty))
         for lid in old_ids - keep:
             db.delete_lamp(lid)
-        st.success("Лампы сохранены")
+        ok, msg = storage.persist(secrets())
+        st.session_state[f"lamps_ver_{room['id']}"] = ver + 1
+        st.session_state["lamps_saved_msg"] = "✅ Лампы сохранены и видны на карте. " + msg
         st.rerun()
     with st.form(f"quick_add_{room['id']}"):
         c = st.columns([3, 1, 1])
@@ -191,5 +196,9 @@ def lamps_tab(room, m):
         q = c[1].number_input("Кол-во", 1, 500, 1)
         if c[2].form_submit_button("➕ Добавить"):
             db.add_lamp(room["map_id"], room["id"], tid, None, None, q)
+            ok, msg = storage.persist(secrets())
+            st.session_state[f"lamps_ver_{room['id']}"] = ver + 1
+            st.session_state["lamps_saved_msg"] = "✅ Лампа добавлена и поставлена на карту. " + msg
             st.rerun()
-    st.caption("💡 Чтобы поставить лампу точкой на карте — «Карты школы» → «✏️ Карандаш».")
+    st.caption("💡 Лампы, добавленные здесь, сами ставятся на свободное место в контуре помещения. "
+               "Точно расставить их можно на «Карты школы» → «✏️ Карандаш» / «🧽 Ластик» → «💾 Сохранить изменения».")

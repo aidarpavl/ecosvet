@@ -195,7 +195,17 @@ def users_tab():
 
 
 def backup_tab():
-    st.caption("На Streamlit Community Cloud файл базы может сбрасываться при перезапуске — регулярно скачивайте копию.")
+    from core import storage
+    from ui.common import secrets
+    mode = storage.mode(secrets())
+    if mode == "github":
+        st.success("☁️ Автосохранение в GitHub включено: данные переживут перезапуск приложения.")
+    else:
+        st.warning("💾 Автосохранение в GitHub не настроено: на Streamlit Cloud данные сбросятся при перезапуске. "
+                   "Добавьте GITHUB_TOKEN и GITHUB_REPO в secrets (см. README) или регулярно скачивайте копию.")
+    if st.button("☁️ Сохранить сейчас" + (" (принудительно в GitHub)" if mode == "github" else "")):
+        ok, msg = storage.persist(secrets(), force=True)
+        (st.success if ok else st.error)(msg)
     st.download_button("⬇️ Скачать резервную копию (JSON)", db.export_json().encode("utf-8"), "ecosvet_backup.json",
                        "application/json", type="primary")
     f = st.file_uploader("Восстановить из копии (JSON)", type=["json"])

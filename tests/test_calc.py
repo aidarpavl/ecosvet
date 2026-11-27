@@ -106,3 +106,30 @@ def test_migration_from_v1():
     seed.migrate()
     r2 = db.get_room(r["id"])
     assert r2["name"] == "Кабинет №5" and r2["win_count"] >= 2
+
+
+def test_add_lamp_gets_map_point_and_batch_apply():
+    seed.ensure_seed()
+    r = next(x for x in db.rooms() if x["name"] == "Кабинет №4")
+    t = db.lamp_types()[0]
+    lid = db.add_lamp(r["map_id"], r["id"], t["id"], None, None, 2)   # как из паспорта
+    l = next(x for x in db.lamps(room_id=r["id"]) if x["id"] == lid)
+    assert l["x"] is not None and min(r["x1"], r["x2"]) <= l["x"] <= max(r["x1"], r["x2"])
+    n = len(db.lamps(room_id=r["id"]))
+    db.apply_lamp_changes([{"map_id": r["map_id"], "room_id": r["id"], "lamp_type_id": t["id"],
+                            "x": r["x1"] + 5, "y": r["y1"] + 5, "qty": 1}], [lid])
+    assert len(db.lamps(room_id=r["id"])) == n          # +1 и −1
+
+
+def test_storage_persist_and_restore(tmp_path, monkeypatch):
+    from core import storage
+    seed.ensure_seed()
+    monkeypatch.setattr(storage, "SNAP_PATH", str(tmp_path / "snap.json"))
+    r = db.rooms()[0]
+    db.update_room(r["id"], {"note": "проверка сохранения"})
+    ok, _ = storage.persist({})
+    assert ok and not db.DIRTY["flag"]
+    db.update_room(r["id"], {"note": "изменено"})
+    assert storage.restore({}) == "локальный снимок"
+    assert db.get_room(r["id"])["note"] == "проверка сохранения"
+    assert storage.mode({}) == "local" and storage.mode({"GITHUB_TOKEN": "x", "GITHUB_REPO": "a/b"}) == "github"

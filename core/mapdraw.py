@@ -86,6 +86,8 @@ def render(map_row: dict, rooms: list[dict], lamps: list[dict], metrics: dict[in
             for rad, a in ((13, 45), (9, 90)):
                 d.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=col + (a,))
             d.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=col + (255,), outline=(40, 40, 40, 255), width=1)
+            if l.get("draft"):   # ещё не сохранена
+                d.ellipse([cx - 9, cy - 9, cx + 9, cy + 9], outline=(255, 0, 140, 255), width=3)
             if int(l.get("qty") or 1) > 1:
                 d.text((cx + 6, cy - 14), f"×{l['qty']}", font=font(12, True), fill=(20, 20, 20, 255))
 

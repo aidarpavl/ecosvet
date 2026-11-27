@@ -3,7 +3,9 @@ import streamlit as st
 
 st.set_page_config(page_title="ЭкоСвет — энергоаудит школы", page_icon="💡", layout="wide")
 
-from core import auth, db, seed  # noqa: E402
+APP_VERSION = "1.4 (27.11.2026)"
+
+from core import auth, db, seed, storage  # noqa: E402
 from ui import (about, admin, ai_page, feedback, home, maps, passport, savings, school,  # noqa: E402
                 swot_page)
 from ui.common import is_admin, secrets, user  # noqa: E402
@@ -20,7 +22,7 @@ div[data-testid="stMetricValue"] {font-size:1.35rem}
 
 @st.cache_resource
 def bootstrap():
-    seed.ensure_seed()
+    seed.ensure_seed(secrets())          # пустая база → восстановление сохранённых данных (GitHub / снимок)
     return auth.ensure_admin(secrets())
 
 
@@ -82,7 +84,22 @@ PAGES = {
 ADMIN_PAGES = {"⚙️ Администрирование": admin.render}
 
 
+def storage_status():
+    st_ = storage.STATUS
+    if storage.mode(secrets()) == "github":
+        if st_["block_push"]:
+            st.error("⚠️ Не удалось загрузить данные из GitHub при запуске — отправка в GitHub приостановлена.")
+        elif st_["last_error"]:
+            st.warning(f"GitHub: {st_['last_error']}")
+        else:
+            st.caption(f"☁️ Данные сохраняются в GitHub · последнее сохранение: {st_['last_ok'] or '—'}")
+    else:
+        st.caption("💾 Данные сохраняются только на сервере. На Streamlit Cloud они сбросятся при перезапуске — "
+                   "настройте GITHUB_TOKEN и GITHUB_REPO (см. README).")
+
+
 def main():
+    storage.flush_if_dirty(secrets())    # всё, что изменили на прошлом шаге, — в постоянное хранилище
     if not user():
         login_page()
         return
@@ -96,11 +113,18 @@ def main():
         st.radio("Навигация", list(pages), key="nav", label_visibility="collapsed")
         if is_admin() and st.session_state.get("weak_admin_pw"):
             st.warning("Пароль администратора по умолчанию! Смените его в «Администрирование → Пользователи».")
+        if is_admin():
+            if st.button("💾 Сохранить", type="primary", use_container_width=True, key="sidebar_save"):
+                ok, msg = storage.persist(secrets(), force=True)
+                (st.success if ok else st.warning)(msg)
+            storage_status()
+        st.caption(f"Версия {APP_VERSION}")
         if st.button("🚪 Выйти", use_container_width=True):
             st.session_state.clear()
             st.rerun()
     banner()
     pages[st.session_state["nav"]]()
+    storage.flush_if_dirty(secrets())
 
 
 main()
