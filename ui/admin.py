@@ -206,6 +206,9 @@ def backup_tab():
     if st.button("☁️ Сохранить сейчас" + (" (принудительно в GitHub)" if mode == "github" else "")):
         ok, msg = storage.persist(secrets(), force=True)
         (st.success if ok else st.error)(msg)
+    if mode == "github" and st.button("🔌 Проверить подключение к GitHub"):
+        for ok, msg in storage.check_github(secrets()):
+            (st.success if ok else st.error)(("✅ " if ok else "❌ ") + msg)
     st.download_button("⬇️ Скачать резервную копию (JSON)", db.export_json().encode("utf-8"), "ecosvet_backup.json",
                        "application/json", type="primary")
     f = st.file_uploader("Восстановить из копии (JSON)", type=["json"])

@@ -133,3 +133,10 @@ def test_storage_persist_and_restore(tmp_path, monkeypatch):
     assert storage.restore({}) == "локальный снимок"
     assert db.get_room(r["id"])["note"] == "проверка сохранения"
     assert storage.mode({}) == "local" and storage.mode({"GITHUB_TOKEN": "x", "GITHUB_REPO": "a/b"}) == "github"
+
+
+def test_normalize_repo():
+    from core.storage import normalize_repo
+    for raw in ["school/ecosvet", " school/ecosvet/ ", "https://github.com/school/ecosvet",
+                "https://github.com/school/ecosvet.git", "github.com/school/ecosvet/tree/main", '"school/ecosvet"']:
+        assert normalize_repo(raw) == "school/ecosvet", raw

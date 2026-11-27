@@ -3,7 +3,7 @@ import streamlit as st
 
 st.set_page_config(page_title="ЭкоСвет — энергоаудит школы", page_icon="💡", layout="wide")
 
-APP_VERSION = "1.4 (27.11.2026)"
+APP_VERSION = "1.5 (27.11.2026)"
 
 from core import auth, db, seed, storage  # noqa: E402
 from ui import (about, admin, ai_page, feedback, home, maps, passport, savings, school,  # noqa: E402
@@ -90,7 +90,8 @@ def storage_status():
         if st_["block_push"]:
             st.error("⚠️ Не удалось загрузить данные из GitHub при запуске — отправка в GitHub приостановлена.")
         elif st_["last_error"]:
-            st.warning(f"GitHub: {st_['last_error']}")
+            st.warning(f"GitHub: {st_['last_error']}  \nПроверка: «Администрирование → Резервная копия → "
+                       "🔌 Проверить подключение к GitHub».")
         else:
             st.caption(f"☁️ Данные сохраняются в GitHub · последнее сохранение: {st_['last_ok'] or '—'}")
     else:
