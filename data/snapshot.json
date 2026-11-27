@@ -2028,15 +2028,6 @@
  ],
  "lamps": [
   {
-   "id": 1,
-   "room_id": 1,
-   "map_id": 1,
-   "lamp_type_id": 2,
-   "x": 294.3,
-   "y": 90.0,
-   "qty": 1
-  },
-  {
    "id": 2,
    "room_id": 1,
    "map_id": 1,
