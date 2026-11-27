@@ -3378,15 +3378,6 @@
    "qty": 1
   },
   {
-   "id": 167,
-   "room_id": 22,
-   "map_id": 1,
-   "lamp_type_id": 2,
-   "x": 116.0,
-   "y": 463.5,
-   "qty": 1
-  },
-  {
    "id": 168,
    "room_id": 23,
    "map_id": 1,
@@ -6776,5 +6767,5 @@
  ],
  "swot_items": [],
  "feedback": [],
- "_exported_at": "2026-11-27 04:47"
+ "_exported_at": "2026-11-27 04:48"
 }
